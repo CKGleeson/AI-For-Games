@@ -9,7 +9,8 @@ public class EnemyController : MonoBehaviour
     [Header("Shooting Settings")]
     public GameObject bulletPrefab;        // Reference to the bullet prefab
     public Transform firePoint;            // Point from where the bullets will spawn
-    public AudioClip gunfireSound;         // Gunfire sound clip
+    public AudioClip gunfireSound; 
+
 
     [Header("Look-Around Settings")]
     public bool canLookAround = true;  // Control whether the enemy can look around
@@ -302,3 +303,162 @@ public class EnemyController : MonoBehaviour
 
     
 }
+
+
+ private enum EnemyState { Wandering, Idle, Attack, Searching, WaitingToSearch }
+    private EnemyState currentState = EnemyState.Wandering;
+
+    
+    private float wanderTimer;
+    private float idleTimer;
+
+
+switch (currentState)
+        {
+            case EnemyState.Wandering:
+                Wander();
+                break;
+            case EnemyState.Idle:
+                Idle();
+                break;
+            case EnemyState.Attack:
+                Attack();
+                break;
+            case EnemyState.WaitingToSearch:
+                // Waiting logic is handled in the coroutine
+                break;
+            case EnemyState.Searching:
+                // Searching behavior handled in coroutine
+                break;
+        }
+
+private void Wander()
+    {
+        Vector3 targetPosition = transform.position + (Vector3)currentDirection;
+        RotateAndMove(targetPosition, wanderSpeed, () =>
+        {
+            wanderTimer -= Time.deltaTime;
+
+            if (wanderTimer <= 0)
+            {
+                currentState = EnemyState.Idle;
+                idleTimer = idleTime;
+                wanderTimer = wanderTime;
+            }
+        });
+    }
+
+private void Idle()
+    {
+        idleTimer -= Time.deltaTime;
+
+        if (idleTimer <= 0)
+        {
+            SetNewDirection();
+            currentState = EnemyState.Wandering;
+        }
+    }
+
+private IEnumerator WaitBeforeSearch()
+    {
+        currentState = EnemyState.WaitingToSearch;
+
+        // Wait for 2 seconds before starting the search
+        float timer = searchWaitTime;
+        while (timer > 0)
+        {
+            if (enemyFOV.IsPlayerInFOV(out Transform detectedPlayer))
+            {
+                // Player spotted again, cancel wait and enter attack mode
+                player = detectedPlayer;
+                EnterAttackMode();
+                yield break;
+            }
+
+            timer -= Time.deltaTime;
+            yield return null;
+        }
+
+        EnterSearchMode();
+    }
+
+    private void EnterSearchMode()
+    {
+        currentState = EnemyState.Searching;
+        StartCoroutine(SmoothSearchRoutine());
+    }
+
+    private IEnumerator SmoothSearchRoutine()
+    {
+        float searchTimer = searchDuration;
+
+        while (searchTimer > 0)
+        {
+            // Perform a smooth left-right-center search
+            yield return SmoothRotate(-5f); // Look slightly left
+            yield return new WaitForSeconds(0.5f);
+
+            yield return SmoothRotate(50f); // Look far right
+            yield return new WaitForSeconds(0.5f);
+
+            yield return SmoothRotate(-45f); // Return to center
+
+            // Check if the player is spotted during the search
+            if (enemyFOV.IsPlayerInFOV(out Transform detectedPlayer))
+            {
+                player = detectedPlayer;
+                EnterAttackMode();
+                yield break;
+            }
+
+            searchTimer -= 1.5f; // Approximate duration of one search cycle
+        }
+
+        // After searching for 3 seconds, go back to wandering and reset FOV
+        ExitSearchMode();
+    }
+
+    private IEnumerator SmoothRotate(float angle)
+    {
+        Quaternion startRotation = transform.rotation;
+        Quaternion targetRotation = Quaternion.Euler(0, 0, transform.eulerAngles.z + angle);
+
+        while (Quaternion.Angle(transform.rotation, targetRotation) > 0.1f)
+        {
+            if (enemyFOV.IsPlayerInFOV(out Transform detectedPlayer))
+            {
+                // Player spotted during rotation, enter attack mode
+                player = detectedPlayer;
+                EnterAttackMode();
+                yield break;
+            }
+
+            transform.rotation = Quaternion.RotateTowards(transform.rotation, targetRotation, rotationSpeed * Time.deltaTime);
+            enemyFOV.SetDirection(transform.up); // Ensure FOV updates during rotation
+            yield return null;
+        }
+    }
+
+    private void ExitSearchMode()
+    {
+        currentState = EnemyState.Wandering;
+
+        // Reset the FOV and view distance to defaults
+        enemyFOV.ResetToDefault();
+
+        SetNewDirection();
+    }
+
+private void EnterAttackMode()
+    {
+        currentState = EnemyState.Attack;
+
+        // Change the FOV and View Distance for attack mode
+        enemyFOV.SetFOV(45f);
+        enemyFOV.SetViewDistance(17f);
+        enemyFOV.SetAttackMode(true); // Enable attack mode
+        enemyFOV.SetDirection((player.position - transform.position).normalized); // Center FOV on the player
+    }
+
+
+
